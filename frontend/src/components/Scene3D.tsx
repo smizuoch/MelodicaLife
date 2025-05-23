@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Group, Vector3, Color } from 'three';
-import PhotonLife from '../engine/PhotonLife';
+import { EvolutionaryParticle } from '../engine/PhotonLife';
 
 interface AudioFeatures {
   bpm: number;
@@ -16,17 +16,18 @@ interface Scene3DProps {
 
 const Scene3D: React.FC<Scene3DProps> = ({ audioFeatures }) => {
   const groupRef = useRef<Group>(null);
-  const photonLifeRef = useRef<PhotonLife[]>([]);
+  const evolutionaryParticlesRef = useRef<EvolutionaryParticle[]>([]);
   const particleSystemRef = useRef<any>(null);
+  const frameCountRef = useRef(0);
+  const neighborCacheRef = useRef<Map<number, EvolutionaryParticle[]>>(new Map());
 
-  // 大量の粒子を生成
-  const particleCount = 2000;
+  const particleCount = 1200; // 最適化のため少し減らす
   const positions = useMemo(() => {
     const pos = new Float32Array(particleCount * 3);
     for (let i = 0; i < particleCount; i++) {
-      pos[i * 3] = (Math.random() - 0.5) * 20;     // x
-      pos[i * 3 + 1] = (Math.random() - 0.5) * 20; // y
-      pos[i * 3 + 2] = (Math.random() - 0.5) * 20; // z
+      pos[i * 3] = (Math.random() - 0.5) * 20;
+      pos[i * 3 + 1] = (Math.random() - 0.5) * 20;
+      pos[i * 3 + 2] = (Math.random() - 0.5) * 20;
     }
     return pos;
   }, []);
@@ -34,169 +35,120 @@ const Scene3D: React.FC<Scene3DProps> = ({ audioFeatures }) => {
   const colors = useMemo(() => {
     const col = new Float32Array(particleCount * 3);
     for (let i = 0; i < particleCount; i++) {
-      col[i * 3] = Math.random();     // r
-      col[i * 3 + 1] = Math.random(); // g
-      col[i * 3 + 2] = Math.random(); // b
+      col[i * 3] = Math.random();
+      col[i * 3 + 1] = Math.random();
+      col[i * 3 + 2] = Math.random();
     }
     return col;
   }, []);
 
-  const velocities = useMemo(() => {
-    const vel = new Float32Array(particleCount * 3);
-    for (let i = 0; i < particleCount; i++) {
-      vel[i * 3] = (Math.random() - 0.5) * 0.02;     // vx
-      vel[i * 3 + 1] = (Math.random() - 0.5) * 0.02; // vy
-      vel[i * 3 + 2] = (Math.random() - 0.5) * 0.02; // vz
-    }
-    return vel;
-  }, []);
-
-  // 初期生命体を作成
+  // 進化型粒子を初期化
   useEffect(() => {
-    photonLifeRef.current = [
-      new PhotonLife({ position: [0, 0, 0], color: [1, 1, 1] }),
-      new PhotonLife({ position: [2, 0, 0], color: [1, 0.5, 0.5] }),
-      new PhotonLife({ position: [-2, 0, 0], color: [0.5, 1, 0.5] })
-    ];
+    evolutionaryParticlesRef.current = [];
+    for (let i = 0; i < particleCount; i++) {
+      const particle = new EvolutionaryParticle([
+        positions[i * 3],
+        positions[i * 3 + 1],
+        positions[i * 3 + 2]
+      ]);
+      evolutionaryParticlesRef.current.push(particle);
+    }
   }, []);
 
-  // フレームごとの更新
   useFrame((_, delta) => {
+    frameCountRef.current++;
+    
     if (groupRef.current) {
-      groupRef.current.rotation.y += delta * 0.1;
+      // 音楽のBPMに同期した回転
+      const rotationSpeed = (audioFeatures.bpm / 120) * 0.02;
+      groupRef.current.rotation.y += delta * rotationSpeed;
     }
 
-    // 粒子システムの更新
-    updateParticleSystem(delta);
-
-    // 生命体を更新
-    photonLifeRef.current.forEach(life => {
-      life.update(audioFeatures, delta);
-    });
+    updateEvolutionarySystem(delta);
   });
 
-  const updateParticleSystem = (delta: number) => {
-    if (!particleSystemRef.current) return;
+  const updateEvolutionarySystem = (delta: number) => {
+    if (!particleSystemRef.current || evolutionaryParticlesRef.current.length === 0) return;
 
     const positionAttribute = particleSystemRef.current.geometry.attributes.position;
     const colorAttribute = particleSystemRef.current.geometry.attributes.color;
     const positions = positionAttribute.array;
     const colors = colorAttribute.array;
 
-    // 音楽特徴から影響を計算
-    const volumeInfluence = audioFeatures.volume / 100;
-    const bpmInfluence = audioFeatures.bpm / 120;
-    const pitchInfluence = (audioFeatures.pitch - 220) / 660;
-
-    for (let i = 0; i < particleCount; i++) {
-      const i3 = i * 3;
-      
-      // 現在位置
-      const x = positions[i3];
-      const y = positions[i3 + 1];
-      const z = positions[i3 + 2];
-
-      // 近隣粒子との相互作用
-      const neighbors = findNearbyParticles(i, positions, 2.0);
-      let forceX = 0, forceY = 0, forceZ = 0;
-
-      // 引力・斥力の計算
-      neighbors.forEach(neighborIndex => {
-        const ni3 = neighborIndex * 3;
-        const dx = positions[ni3] - x;
-        const dy = positions[ni3 + 1] - y;
-        const dz = positions[ni3 + 2] - z;
-        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        
-        if (distance > 0 && distance < 2.0) {
-          const force = distance < 1.0 ? -0.001 : 0.0005; // 近いと斥力、遠いと引力
-          forceX += (dx / distance) * force;
-          forceY += (dy / distance) * force;
-          forceZ += (dz / distance) * force;
-        }
-      });
-
-      // 音楽による外力
-      const musicForceX = Math.sin(Date.now() * 0.001 + i * 0.1) * volumeInfluence * 0.01;
-      const musicForceY = Math.cos(Date.now() * 0.002 + i * 0.1) * bpmInfluence * 0.01;
-      const musicForceZ = Math.sin(Date.now() * 0.0015 + i * 0.1) * pitchInfluence * 0.01;
-
-      // 速度更新
-      velocities[i3] += (forceX + musicForceX) * delta;
-      velocities[i3 + 1] += (forceY + musicForceY) * delta;
-      velocities[i3 + 2] += (forceZ + musicForceZ) * delta;
-
-      // 減衰
-      velocities[i3] *= 0.99;
-      velocities[i3 + 1] *= 0.99;
-      velocities[i3 + 2] *= 0.99;
-
-      // 位置更新
-      positions[i3] += velocities[i3];
-      positions[i3 + 1] += velocities[i3 + 1];
-      positions[i3 + 2] += velocities[i3 + 2];
-
-      // 境界での反射
-      if (Math.abs(positions[i3]) > 10) {
-        velocities[i3] *= -0.8;
-        positions[i3] = Math.sign(positions[i3]) * 10;
-      }
-      if (Math.abs(positions[i3 + 1]) > 10) {
-        velocities[i3 + 1] *= -0.8;
-        positions[i3 + 1] = Math.sign(positions[i3 + 1]) * 10;
-      }
-      if (Math.abs(positions[i3 + 2]) > 10) {
-        velocities[i3 + 2] *= -0.8;
-        positions[i3 + 2] = Math.sign(positions[i3 + 2]) * 10;
-      }
-
-      // 色の更新（音楽に基づく）
-      const hue = (pitchInfluence + 1) * 0.5; // 0-1
-      const saturation = volumeInfluence;
-      const brightness = 0.5 + bpmInfluence * 0.5;
-      
-      const color = new Color().setHSL(hue, saturation, brightness);
-      colors[i3] = color.r;
-      colors[i3 + 1] = color.g;
-      colors[i3 + 2] = color.b;
+    // 近隣キャッシュを定期的にクリア（最適化）
+    if (frameCountRef.current % 10 === 0) {
+      neighborCacheRef.current.clear();
     }
+
+    // 各粒子を更新
+    evolutionaryParticlesRef.current.forEach((particle, index) => {
+      // 近隣粒子をキャッシュから取得または計算
+      let neighbors = neighborCacheRef.current.get(index);
+      if (!neighbors || frameCountRef.current % 5 === 0) {
+        neighbors = findEvolutionaryNeighbors(particle, 3.0);
+        neighborCacheRef.current.set(index, neighbors);
+      }
+      
+      // 粒子を更新
+      particle.update(audioFeatures, neighbors, delta);
+      
+      // 位置と色をバッファに反映
+      const i3 = index * 3;
+      positions[i3] = particle.position[0];
+      positions[i3 + 1] = particle.position[1];
+      positions[i3 + 2] = particle.position[2];
+      
+      colors[i3] = particle.color[0];
+      colors[i3 + 1] = particle.color[1];
+      colors[i3 + 2] = particle.color[2];
+    });
 
     positionAttribute.needsUpdate = true;
-    colorAttribute.needsUpdate = true;
+    // 色更新頻度を下げて最適化
+    if (frameCountRef.current % 2 === 0) {
+      colorAttribute.needsUpdate = true;
+    }
   };
 
-  const findNearbyParticles = (index: number, positions: Float32Array, radius: number): number[] => {
-    const neighbors: number[] = [];
-    const x = positions[index * 3];
-    const y = positions[index * 3 + 1];
-    const z = positions[index * 3 + 2];
+  const findEvolutionaryNeighbors = (particle: EvolutionaryParticle, radius: number): EvolutionaryParticle[] => {
+    const neighbors: EvolutionaryParticle[] = [];
+    const maxNeighbors = 15; // 最適化のため削減
+    const radiusSq = radius * radius; // 平方根計算を避ける最適化
 
-    // 効率化のため、近隣の粒子のみチェック
-    const checkCount = Math.min(50, particleCount);
-    for (let i = 0; i < checkCount; i++) {
-      const otherIndex = (index + i + 1) % particleCount;
-      const dx = positions[otherIndex * 3] - x;
-      const dy = positions[otherIndex * 3 + 1] - y;
-      const dz = positions[otherIndex * 3 + 2] - z;
-      const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      
-      if (distance < radius) {
-        neighbors.push(otherIndex);
+    for (let i = 0; i < evolutionaryParticlesRef.current.length && neighbors.length < maxNeighbors; i++) {
+      const other = evolutionaryParticlesRef.current[i];
+      if (other === particle) continue;
+
+      const dx = other.position[0] - particle.position[0];
+      const dy = other.position[1] - particle.position[1];
+      const dz = other.position[2] - particle.position[2];
+      const distanceSq = dx * dx + dy * dy + dz * dz;
+
+      if (distanceSq < radiusSq) {
+        neighbors.push(other);
       }
     }
-    
+
     return neighbors;
   };
 
   return (
     <group ref={groupRef}>
-      {/* 背景環境 */}
+      {/* 背景環境 - 音楽に反応 */}
       <mesh>
         <sphereGeometry args={[50, 32, 32]} />
-        <meshBasicMaterial color={0x000008} transparent opacity={0.05} />
+        <meshBasicMaterial 
+          color={new Color().setHSL(
+            (audioFeatures.pitch - 220) / 660,
+            0.3,
+            0.05 + (audioFeatures.volume / 100) * 0.05
+          )} 
+          transparent 
+          opacity={0.03} 
+        />
       </mesh>
 
-      {/* 粒子システム */}
+      {/* 進化型粒子システム */}
       <points ref={particleSystemRef}>
         <bufferGeometry>
           <bufferAttribute
@@ -213,77 +165,83 @@ const Scene3D: React.FC<Scene3DProps> = ({ audioFeatures }) => {
           />
         </bufferGeometry>
         <pointsMaterial 
-          size={0.02}
+          size={0.025 + (audioFeatures.volume / 100) * 0.02}
           vertexColors
           transparent 
-          opacity={0.8}
+          opacity={0.85}
           sizeAttenuation={true}
-          blending={2} // AdditiveBlending
+          blending={2}
         />
       </points>
 
-      {/* 接続線（近隣粒子間） */}
-      <ConnectionLines 
-        positions={positions} 
+      {/* 流動接続線 */}
+      <FlowConnections 
+        particles={evolutionaryParticlesRef.current}
         audioFeatures={audioFeatures}
-        particleCount={particleCount}
+        frameCount={frameCountRef.current}
       />
 
-      {/* 光子生命体（中心的な存在） */}
-      {photonLifeRef.current.map((life, index) => (
-        <mesh key={index} position={life.position}>
-          <sphereGeometry args={[life.size * 0.5, 8, 8]} />
-          <meshBasicMaterial 
-            color={life.color} 
-            transparent 
-            opacity={0.6}
-          />
-        </mesh>
-      ))}
+      {/* 音楽波動エフェクト */}
+      <MusicWaveEffect 
+        audioFeatures={audioFeatures}
+        frameCount={frameCountRef.current}
+      />
     </group>
   );
 };
 
-// 粒子間の接続線を描画するコンポーネント
-const ConnectionLines: React.FC<{
-  positions: Float32Array;
+// 流動接続線コンポーネント - 最適化版
+const FlowConnections: React.FC<{
+  particles: EvolutionaryParticle[];
   audioFeatures: AudioFeatures;
-  particleCount: number;
-}> = ({ positions, audioFeatures, particleCount }) => {
+  frameCount: number;
+}> = ({ particles, audioFeatures, frameCount }) => {
   const linesRef = useRef<any>(null);
   
   const linePositions = useMemo(() => {
+    // 更新頻度を下げて最適化
+    if (frameCount % 3 !== 0) return new Float32Array(0);
+
     const linePos: number[] = [];
-    const maxConnections = 500; // パフォーマンス制限
+    const maxConnections = 600; // 最適化
     let connectionCount = 0;
 
-    for (let i = 0; i < particleCount && connectionCount < maxConnections; i++) {
-      const x1 = positions[i * 3];
-      const y1 = positions[i * 3 + 1];
-      const z1 = positions[i * 3 + 2];
+    for (let i = 0; i < particles.length && connectionCount < maxConnections; i++) {
+      const particle = particles[i];
+      if (!particle) continue;
 
-      // 近隣5粒子との接続線
-      for (let j = i + 1; j < Math.min(i + 6, particleCount) && connectionCount < maxConnections; j++) {
-        const x2 = positions[j * 3];
-        const y2 = positions[j * 3 + 1];
-        const z2 = positions[j * 3 + 2];
+      const connectionThreshold = 1.8 - particle.traits.socialTendency * 0.5;
+      
+      for (let j = i + 1; j < Math.min(i + 10, particles.length) && connectionCount < maxConnections; j++) {
+        const other = particles[j];
+        if (!other) continue;
 
-        const distance = Math.sqrt((x2-x1)**2 + (y2-y1)**2 + (z2-z1)**2);
+        const dx = other.position[0] - particle.position[0];
+        const dy = other.position[1] - particle.position[1];
+        const dz = other.position[2] - particle.position[2];
+        const distanceSq = dx*dx + dy*dy + dz*dz;
         
-        if (distance < 1.5) { // 一定距離内のみ接続
-          linePos.push(x1, y1, z1, x2, y2, z2);
+        if (distanceSq < connectionThreshold * connectionThreshold) {
+          linePos.push(
+            particle.position[0], particle.position[1], particle.position[2],
+            other.position[0], other.position[1], other.position[2]
+          );
           connectionCount++;
         }
       }
     }
 
     return new Float32Array(linePos);
-  }, [positions, particleCount]);
+  }, [particles, frameCount]);
 
   useFrame(() => {
     if (linesRef.current) {
-      const opacity = (audioFeatures.volume / 100) * 0.3;
-      linesRef.current.material.opacity = opacity;
+      const opacity = (audioFeatures.volume / 100) * 0.5;
+      linesRef.current.material.opacity = Math.max(0.03, opacity);
+      
+      // 音楽に合わせて色変化
+      const hue = (audioFeatures.pitch - 220) / 660;
+      linesRef.current.material.color.setHSL(hue, 0.8, 0.6);
     }
   });
 
@@ -298,12 +256,82 @@ const ConnectionLines: React.FC<{
         />
       </bufferGeometry>
       <lineBasicMaterial 
-        color={0x44ccff}
+        color={0x66aaff}
         transparent
         opacity={0.1}
-        blending={2} // AdditiveBlending
+        blending={2}
       />
     </lineSegments>
+  );
+};
+
+// 音楽波動エフェクト
+const MusicWaveEffect: React.FC<{
+  audioFeatures: AudioFeatures;
+  frameCount: number;
+}> = ({ audioFeatures, frameCount }) => {
+  const waveRef = useRef<any>(null);
+  const smoothedVolumeRef = useRef(0);
+  const smoothedBPMRef = useRef(120);
+  const baseScaleRef = useRef(0.8);
+
+  useFrame((_, delta) => {
+    if (waveRef.current) {
+      // 音楽データの適度な平滑化（良いバランス）
+      const smoothingFactor = 0.85; // 適度な平滑化
+      smoothedVolumeRef.current = smoothedVolumeRef.current * smoothingFactor + 
+                                  (audioFeatures.volume / 100) * (1 - smoothingFactor);
+      smoothedBPMRef.current = smoothedBPMRef.current * smoothingFactor + 
+                               audioFeatures.bpm * (1 - smoothingFactor);
+
+      const bpmFactor = smoothedBPMRef.current / 120;
+      const volumeFactor = smoothedVolumeRef.current;
+      
+      // 位置を中心に固定
+      waveRef.current.position.set(0, 0, 0);
+      
+      // 音楽に反応する脈動パターン
+      const time = frameCount * 0.02; // 時間進行を適度に
+      const rhythmPulse = Math.sin(time * bpmFactor * 0.8) * 0.2; // 適度な振幅
+      const subtlePulse = Math.sin(time * bpmFactor * 2.1) * 0.08; // 微細な脈動
+      const volumePulse = volumeFactor * 0.3; // 音量による反応
+      
+      // ベーススケールの適度な変更
+      const targetBaseScale = 0.6 + volumeFactor * 0.25; // 音楽に応じてサイズ変化
+      baseScaleRef.current += (targetBaseScale - baseScaleRef.current) * 0.02; // 適度な速度
+      
+      // 最終的な脈動ファクター
+      const finalPulseFactor = baseScaleRef.current + rhythmPulse + subtlePulse + volumePulse;
+      
+      // スケールを適用（音楽に敏感に反応）
+      const currentScale = waveRef.current.scale.x;
+      const targetScale = Math.max(0.4, Math.min(1.3, finalPulseFactor)); // 広めの範囲
+      const interpolatedScale = currentScale + (targetScale - currentScale) * 0.08; // 適度な補間速度
+      
+      waveRef.current.scale.setScalar(interpolatedScale);
+      
+      // 透明度も音楽に合わせて変化
+      const currentOpacity = waveRef.current.material.opacity;
+      const targetOpacity = volumeFactor * 0.15 + 0.05; // 適度な透明度変化
+      const interpolatedOpacity = currentOpacity + (targetOpacity - currentOpacity) * 0.05;
+      waveRef.current.material.opacity = interpolatedOpacity;
+      
+      // 音楽に合わせて色相も変化
+      const hue = (audioFeatures.pitch - 220) / 660 * 360;
+      waveRef.current.material.color.setHSL(hue / 360, 0.6, 0.8);
+    }
+  });
+
+  return (
+    <mesh ref={waveRef} position={[0, 0, 0]}>
+      <sphereGeometry args={[1.2, 16, 16]} />
+      <meshBasicMaterial 
+        color={0xffffff}
+        transparent
+        opacity={0.08}
+        wireframe
+      />
+    </mesh>
   );
 };
 

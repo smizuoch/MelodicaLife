@@ -85,17 +85,21 @@ export class YouTubeService {
 
       console.log(`Getting playlist info for: ${playlistUrl}`);
 
-      // yt-dlpでプレイリスト情報を取得（最初の5件のみ）
-      const command = `${this.ytDlpPath} --dump-json --flat-playlist --playlist-end 5 "${playlistUrl}"`;
+      // yt-dlpでプレイリスト情報を取得（制限を50件に拡張）
+      const command = `${this.ytDlpPath} --dump-json --flat-playlist --playlist-end 50 --no-warnings --no-check-certificate "${playlistUrl}"`;
       console.log(`Executing: ${command}`);
       
       const { stdout, stderr } = await execAsync(command, { 
-        timeout: 60000,
-        maxBuffer: 1024 * 1024 * 10 // 10MB buffer
+        timeout: 120000, // タイムアウトを2分に延長
+        maxBuffer: 1024 * 1024 * 50 // バッファを50MBに拡張
       });
 
-      if (stderr) {
+      if (stderr && !stderr.includes('WARNING')) {
         console.warn('yt-dlp stderr:', stderr);
+      }
+
+      if (!stdout.trim()) {
+        throw new Error('No data returned from yt-dlp for playlist');
       }
 
       const lines = stdout.trim().split('\n').filter(line => line.trim());
@@ -103,37 +107,93 @@ export class YouTubeService {
       
       let playlistTitle = 'Unknown Playlist';
 
+      console.log(`Processing ${lines.length} playlist entries...`);
+
       for (const line of lines) {
         try {
           const entry = JSON.parse(line);
           
-          if (entry.playlist_title && !playlistTitle.includes('Unknown')) {
+          // プレイリストタイトルを取得
+          if (entry.playlist_title && playlistTitle === 'Unknown Playlist') {
             playlistTitle = entry.playlist_title;
           }
 
-          if (entry.id && entry.title) {
+          // 動画エントリーのみ処理
+          if (entry.id && entry.title && entry._type !== 'playlist') {
             videos.push({
               id: entry.id,
               title: entry.title,
               duration: parseInt(entry.duration) || 0,
-              thumbnail: entry.thumbnail || '',
+              thumbnail: entry.thumbnail || `https://img.youtube.com/vi/${entry.id}/mqdefault.jpg`,
               audioUrl: '' // 後で取得
             });
           }
         } catch (parseError) {
-          console.warn('Failed to parse playlist entry:', parseError);
+          console.warn('Failed to parse playlist entry:', line.substring(0, 100), parseError);
         }
       }
 
+      console.log(`Successfully parsed ${videos.length} videos from playlist`);
+
+      // 最大50件まで返す
       return {
         id: playlistId,
         title: playlistTitle,
-        videos: videos.slice(0, 10) // 最大10件
+        videos: videos.slice(0, 50)
       };
     } catch (error) {
       console.error('Failed to get playlist info:', error);
-      throw new Error('Failed to fetch playlist information');
+      
+      // フォールバック：直接プレイリストURLからビデオIDを抽出を試行
+      try {
+        console.log('Trying fallback method...');
+        return await this.getFallbackPlaylistInfo(playlistUrl);
+      } catch (fallbackError) {
+        console.error('Fallback also failed:', fallbackError);
+        throw new Error(`Failed to fetch playlist information: ${(error as Error).message}`);
+      }
     }
+  }
+
+  // フォールバック方法：より簡単なプレイリスト取得
+  private async getFallbackPlaylistInfo(playlistUrl: string): Promise<PlaylistInfo> {
+    const playlistId = this.extractPlaylistId(playlistUrl);
+    if (!playlistId) throw new Error('Invalid playlist URL');
+
+    console.log('Using fallback playlist method...');
+
+    // より基本的なコマンドを使用
+    const command = `${this.ytDlpPath} --flat-playlist --print id --print title --playlist-end 50 "${playlistUrl}"`;
+    
+    const { stdout } = await execAsync(command, { 
+      timeout: 90000,
+      maxBuffer: 1024 * 1024 * 20
+    });
+
+    const lines = stdout.trim().split('\n');
+    const videos: VideoInfo[] = [];
+    
+    // IDとタイトルが交互に出力されると仮定
+    for (let i = 0; i < lines.length; i += 2) {
+      const id = lines[i]?.trim();
+      const title = lines[i + 1]?.trim();
+      
+      if (id && title && id.length === 11) { // YouTube video ID は11文字
+        videos.push({
+          id,
+          title,
+          duration: 180, // デフォルト値
+          thumbnail: `https://img.youtube.com/vi/${id}/mqdefault.jpg`,
+          audioUrl: ''
+        });
+      }
+    }
+
+    return {
+      id: playlistId,
+      title: `Playlist ${playlistId}`,
+      videos
+    };
   }
 
   async getAudioStream(url: string): Promise<string> {

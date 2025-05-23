@@ -731,8 +731,8 @@ const MusicPlayer: React.FC<MusicPlayerProps> = ({ onPlayStateChange, onAudioCon
 
       {/* Track List */}
       <div className="track-list">
-        <h4>Tracks</h4>
-        <div className="tracks">
+        <h4>Tracks ({currentPlaylist?.tracks.length || 0})</h4>
+        <div className="tracks" style={{ maxHeight: '300px', overflowY: 'auto' }}>
           {currentPlaylist?.tracks.map((track, index) => (
             <div 
               key={track.id}
@@ -742,7 +742,7 @@ const MusicPlayer: React.FC<MusicPlayerProps> = ({ onPlayStateChange, onAudioCon
               onClick={() => setCurrentTrackIndex(index)}
             >
               <span className="track-number">{index + 1}</span>
-              <span className="track-title">{track.title}</span>
+              <span className="track-title" title={track.title}>{track.title}</span>
               <span className="track-status">
                 {index === currentTrackIndex && isPlaying && '▶️'}
                 {index === currentTrackIndex && !isPlaying && '⏸️'}
@@ -752,6 +752,24 @@ const MusicPlayer: React.FC<MusicPlayerProps> = ({ onPlayStateChange, onAudioCon
             </div>
           ))}
         </div>
+        
+        {/* プレイリスト統計 */}
+        {currentPlaylist && (
+          <div className="playlist-stats" style={{ 
+            marginTop: '0.5rem', 
+            fontSize: '0.8rem', 
+            opacity: 0.7,
+            padding: '0.5rem',
+            background: 'rgba(255,255,255,0.05)',
+            borderRadius: '4px'
+          }}>
+            <div>Total tracks: {currentPlaylist.tracks.length}</div>
+            <div>Total duration: {formatTime(
+              currentPlaylist.tracks.reduce((sum, track) => sum + track.duration, 0)
+            )}</div>
+            <div>Current: {currentTrackIndex + 1}/{currentPlaylist.tracks.length}</div>
+          </div>
+        )}
       </div>
     </div>
   );
