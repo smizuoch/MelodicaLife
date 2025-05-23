@@ -47,7 +47,8 @@ function App() {
             <pointLight position={[10, 10, 10]} />
             <Scene3D audioFeatures={audioFeatures} />
             <OrbitControls enablePan={true} enableZoom={true} enableRotate={true} />
-            <Stats />
+            {/* 開発環境でのみFPS表示 */}
+            {import.meta.env.DEV && <Stats />}
           </Canvas>
         </div>
 
