@@ -1,0 +1,28 @@
+FROM node:18-alpine
+
+# Python仮想環境とyt-dlpをインストール
+RUN apk add --no-cache python3 py3-pip ffmpeg && \
+    python3 -m venv /opt/venv && \
+    /opt/venv/bin/pip install --upgrade pip && \
+    /opt/venv/bin/pip install yt-dlp
+
+# PATHに仮想環境を追加
+ENV PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /app
+
+# package.jsonをコピー
+COPY package.json ./
+
+# 開発用依存関係をコンテナ内でインストール
+RUN npm cache clean --force && \
+    npm install --no-package-lock
+
+# ポート3001を公開
+EXPOSE 3001
+
+# ソースコードをマウントするためのボリューム準備
+VOLUME ["/app/src"]
+
+# 開発サーバー起動
+CMD ["npm", "run", "dev"]

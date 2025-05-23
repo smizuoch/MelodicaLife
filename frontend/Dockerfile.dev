@@ -1,0 +1,19 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# package.jsonをコピー
+COPY package.json ./
+
+# 開発用依存関係をコンテナ内でインストール
+RUN npm cache clean --force && \
+    npm install --no-package-lock
+
+# ポート5173を公開
+EXPOSE 5173
+
+# ソースコードをマウントするためのボリューム準備
+VOLUME ["/app/src", "/app/public"]
+
+# 開発サーバー起動
+CMD ["npm", "run", "dev"]

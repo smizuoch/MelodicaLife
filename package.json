@@ -1,0 +1,23 @@
+{
+  "name": "melodicalife",
+  "version": "1.0.0",
+  "description": "音楽による光子生命体進化シミュレーター",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "make dev",
+    "build": "make build",
+    "start": "make up",
+    "clean": "make clean",
+    "install:all": "make install"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.5.1"
+  },
+  "author": "MelodicaLife Team",
+  "license": "MIT"
+}
